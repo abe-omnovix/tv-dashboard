@@ -28,6 +28,14 @@ open("app/src/main/assets/index.html", "w").write(out)
 print("assets/index.html assembled (local fonts)")
 PY
 
+# 1b. Bake secrets into the APK as config.json (local-only file; gitignored)
+if [ -f secrets.json ]; then
+  cp secrets.json app/src/main/assets/config.json
+  echo "config.json baked from secrets.json"
+else
+  rm -f app/src/main/assets/config.json
+fi
+
 # 2. Link manifest + assets into a resource-only APK
 "$BT/aapt2" link -o "$OUT/base.apk" \
   --manifest app/src/main/AndroidManifest.xml \

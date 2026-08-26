@@ -156,7 +156,7 @@
     color: var(--ink);
     opacity: 0.92;
     margin-top: 2.6vh;
-    max-width: 62vw;
+    max-width: 52vw;
     min-height: 1.25em;
   }
 
@@ -175,6 +175,43 @@
   }
   #detail span b { font-weight: 400; color: var(--ink-dim); }
   #detail .sep { letter-spacing: 0; }
+
+  /* ---- Ops ledger (bottom right) ---- */
+  #ops {
+    position: fixed;
+    right: 7vw;
+    bottom: 9vh;
+    text-align: right;
+    transition: transform 12s ease-in-out;
+    max-width: 34vw;
+  }
+
+  #ops .ops-brand {
+    font-weight: 300;
+    font-size: 2.1vh;
+    font-size: clamp(14px, 2.1vh, 34px);
+    letter-spacing: 0.42em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    margin-bottom: 0.6vh;
+  }
+
+  #ops .ops-line {
+    font-weight: 300;
+    font-size: 1.9vh;
+    font-size: clamp(12px, 1.9vh, 30px);
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    margin-top: 1.7vh;
+    line-height: 1.5;
+    white-space: nowrap;
+  }
+
+  #ops .ops-line b { font-weight: 400; color: var(--ink-dim); }
+  #ops .ok  { color: rgba(168, 212, 176, 0.78); }
+  #ops .bad { color: rgba(226, 156, 143, 0.85); }
+  #ops .dim { color: var(--ink-faint); }
 
   .hidden { visibility: hidden; }
 
@@ -199,6 +236,8 @@
     <div id="almanac" class="hidden">&nbsp;</div>
     <div id="detail" class="hidden"></div>
   </div>
+
+  <div id="ops" class="hidden"></div>
 
 <script>
 // ================= CONFIG =================
@@ -253,6 +292,9 @@ function drift() {
   var x = Math.round((Math.random() - 0.5) * 56);
   var y = Math.round((Math.random() - 0.5) * 44);
   $("stage").style.transform = "translate(" + x + "px," + y + "px)";
+  var ox = Math.round((Math.random() - 0.5) * 56);
+  var oy = Math.round((Math.random() - 0.5) * 44);
+  $("ops").style.transform = "translate(" + ox + "px," + oy + "px)";
 }
 
 // ---------- Location ----------
@@ -550,12 +592,345 @@ function drawStars() {
   }
 }
 
+// ================= Ops ledger (phase 2) =================
+// GitHub / PostHog / AWS numbers, fed by config.json baked into the APK
+// from android/secrets.json at build time. No config -> section stays hidden.
+
+var APPCONFIG = null;
+var OPS = { github: null, posthog: null, aws: null };
+
+// XHR, not fetch: the WebView's universal-file-access bypasses CORS for
+// XHR only, and PostHog/AWS endpoints don't answer CORS preflights.
+function xhrRequest(method, url, headers, body) {
+  return new Promise(function (resolve, reject) {
+    var x = new XMLHttpRequest();
+    x.open(method, url, true);
+    if (headers) { for (var k in headers) x.setRequestHeader(k, headers[k]); }
+    x.onreadystatechange = function () {
+      if (x.readyState === 4) {
+        if (x.status >= 200 && x.status < 300) resolve(x.responseText);
+        else reject(new Error(method + " " + url + " -> HTTP " + x.status));
+      }
+    };
+    x.onerror = function () { reject(new Error("network error: " + url)); };
+    x.send(body || null);
+  });
+}
+function xhrJSON(method, url, headers, body) {
+  return xhrRequest(method, url, headers, body).then(function (t) { return JSON.parse(t); });
+}
+
+function hasValue(v) {
+  return typeof v === "string" && v.length > 0 && v.indexOf("PASTE") !== 0;
+}
+
+function localDateStr() {
+  var n = new Date();
+  var m = n.getMonth() + 1, d = n.getDate();
+  return n.getFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (d < 10 ? "0" : "") + d;
+}
+
+function fmtNum(n) {
+  if (n >= 10000) return Math.round(n / 1000) + "k";
+  return Number(n).toLocaleString("en-US");
+}
+
+// ---------- GitHub ----------
+function ghGet(cfg, path) {
+  return xhrJSON("GET", "https://api.github.com" + path, {
+    "Authorization": "Bearer " + cfg.token,
+    "Accept": "application/vnd.github+json"
+  });
+}
+
+function refreshGithub() {
+  var cfg = APPCONFIG && APPCONFIG.github;
+  if (!cfg || !hasValue(cfg.token)) return;
+  ghGet(cfg, "/user").then(function (u) {
+    var org = cfg.org;
+    var q = function (s) { return encodeURIComponent(s) + "&per_page=1"; };
+    var deploys = Promise.all((cfg.repos || []).map(function (r) {
+      return ghGet(cfg, "/repos/" + r.repo + "/actions/runs?branch=main&per_page=1")
+        .then(function (d) {
+          var run = d.workflow_runs && d.workflow_runs[0];
+          return { label: r.label, state: run ? (run.conclusion || "running") : "none" };
+        })
+        .catch(function () { return { label: r.label, state: "unknown" }; });
+    }));
+    return Promise.all([
+      ghGet(cfg, "/search/issues?q=" + q("org:" + org + " is:pr is:open draft:false")),
+      ghGet(cfg, "/search/issues?q=" + q("org:" + org + " is:pr is:open review-requested:" + u.login)),
+      ghGet(cfg, "/search/commits?q=" + q("org:" + org + " author-date:>=" + localDateStr())),
+      deploys
+    ]);
+  }).then(function (r) {
+    OPS.github = {
+      prsOpen: r[0].total_count,
+      reviews: r[1].total_count,
+      commitsToday: r[2].total_count,
+      deploys: r[3]
+    };
+    saveOpsCache();
+    renderOps();
+  }).catch(function (e) {
+    if (window.console && console.warn) console.warn("github:", e);
+  });
+}
+
+// ---------- PostHog ----------
+function phQuery(cfg, hogql) {
+  return xhrJSON("POST", cfg.host + "/api/projects/" + cfg.projectId + "/query/", {
+    "Authorization": "Bearer " + cfg.personalApiKey,
+    "Content-Type": "application/json"
+  }, JSON.stringify({ query: { kind: "HogQLQuery", query: hogql } }));
+}
+function phCell(r) {
+  return (r.results && r.results[0] && r.results[0][0]) || 0;
+}
+
+function refreshPosthog() {
+  var cfg = APPCONFIG && APPCONFIG.posthog;
+  if (!cfg || !hasValue(cfg.personalApiKey)) return;
+  var ready = cfg.projectId
+    ? Promise.resolve()
+    : xhrJSON("GET", cfg.host + "/api/projects/", { "Authorization": "Bearer " + cfg.personalApiKey })
+        .then(function (d) { cfg.projectId = d.results[0].id; });
+  ready.then(function () {
+    return Promise.all([
+      phQuery(cfg, "select count(distinct person_id) from events where timestamp >= today()"),
+      phQuery(cfg, "select count(distinct person_id) from events where timestamp >= now() - interval 7 day"),
+      phQuery(cfg, "select count() from events where timestamp >= today()")
+    ]);
+  }).then(function (r) {
+    OPS.posthog = { dau: phCell(r[0]), wau: phCell(r[1]), events: phCell(r[2]) };
+    saveOpsCache();
+    renderOps();
+  }).catch(function (e) {
+    if (window.console && console.warn) console.warn("posthog:", e);
+  });
+}
+
+// ---------- AWS (SigV4-signed CloudWatch query, no SDK) ----------
+// sha256/hmac implemented locally: file:// pages have no crypto.subtle.
+var SHA256_K = [
+  0x428a2f98,0x71374491,0xb5c0fbcf,0xe9b5dba5,0x3956c25b,0x59f111f1,0x923f82a4,0xab1c5ed5,
+  0xd807aa98,0x12835b01,0x243185be,0x550c7dc3,0x72be5d74,0x80deb1fe,0x9bdc06a7,0xc19bf174,
+  0xe49b69c1,0xefbe4786,0x0fc19dc6,0x240ca1cc,0x2de92c6f,0x4a7484aa,0x5cb0a9dc,0x76f988da,
+  0x983e5152,0xa831c66d,0xb00327c8,0xbf597fc7,0xc6e00bf3,0xd5a79147,0x06ca6351,0x14292967,
+  0x27b70a85,0x2e1b2138,0x4d2c6dfc,0x53380d13,0x650a7354,0x766a0abb,0x81c2c92e,0x92722c85,
+  0xa2bfe8a1,0xa81a664b,0xc24b8b70,0xc76c51a3,0xd192e819,0xd6990624,0xf40e3585,0x106aa070,
+  0x19a4c116,0x1e376c08,0x2748774c,0x34b0bcb5,0x391c0cb3,0x4ed8aa4a,0x5b9cca4f,0x682e6ff3,
+  0x748f82ee,0x78a5636f,0x84c87814,0x8cc70208,0x90befffa,0xa4506ceb,0xbef9a3f7,0xc67178f2
+];
+
+function utf8Bytes(s) {
+  var out = [], i, c;
+  for (i = 0; i < s.length; i++) {
+    c = s.charCodeAt(i);
+    if (c < 128) out.push(c);
+    else if (c < 2048) { out.push(192 | (c >> 6), 128 | (c & 63)); }
+    else { out.push(224 | (c >> 12), 128 | ((c >> 6) & 63), 128 | (c & 63)); }
+  }
+  return out;
+}
+
+function sha256Bytes(bytes) {
+  var h = [0x6a09e667,0xbb67ae85,0x3c6ef372,0xa54ff53a,0x510e527f,0x9b05688c,0x1f83d9ab,0x5be0cd19];
+  var msg = bytes.slice();
+  var bitLen = bytes.length * 8;
+  msg.push(0x80);
+  while (msg.length % 64 !== 56) msg.push(0);
+  for (var sh = 56; sh >= 32; sh -= 8) msg.push(0); // length < 2^32 bits
+  msg.push((bitLen >>> 24) & 255, (bitLen >>> 16) & 255, (bitLen >>> 8) & 255, bitLen & 255);
+  var w = new Array(64);
+  for (var off = 0; off < msg.length; off += 64) {
+    for (var i = 0; i < 16; i++) {
+      w[i] = (msg[off+4*i] << 24) | (msg[off+4*i+1] << 16) | (msg[off+4*i+2] << 8) | msg[off+4*i+3];
+    }
+    for (i = 16; i < 64; i++) {
+      var s0 = ((w[i-15] >>> 7) | (w[i-15] << 25)) ^ ((w[i-15] >>> 18) | (w[i-15] << 14)) ^ (w[i-15] >>> 3);
+      var s1 = ((w[i-2] >>> 17) | (w[i-2] << 15)) ^ ((w[i-2] >>> 19) | (w[i-2] << 13)) ^ (w[i-2] >>> 10);
+      w[i] = (w[i-16] + s0 + w[i-7] + s1) | 0;
+    }
+    var a=h[0],b=h[1],c=h[2],d=h[3],e=h[4],f=h[5],g=h[6],hh=h[7];
+    for (i = 0; i < 64; i++) {
+      var S1 = ((e >>> 6) | (e << 26)) ^ ((e >>> 11) | (e << 21)) ^ ((e >>> 25) | (e << 7));
+      var ch = (e & f) ^ (~e & g);
+      var t1 = (hh + S1 + ch + SHA256_K[i] + w[i]) | 0;
+      var S0 = ((a >>> 2) | (a << 30)) ^ ((a >>> 13) | (a << 19)) ^ ((a >>> 22) | (a << 10));
+      var maj = (a & b) ^ (a & c) ^ (b & c);
+      var t2 = (S0 + maj) | 0;
+      hh=g; g=f; f=e; e=(d+t1)|0; d=c; c=b; b=a; a=(t1+t2)|0;
+    }
+    h[0]=(h[0]+a)|0; h[1]=(h[1]+b)|0; h[2]=(h[2]+c)|0; h[3]=(h[3]+d)|0;
+    h[4]=(h[4]+e)|0; h[5]=(h[5]+f)|0; h[6]=(h[6]+g)|0; h[7]=(h[7]+hh)|0;
+  }
+  var out = [];
+  for (i = 0; i < 8; i++) out.push((h[i] >>> 24) & 255, (h[i] >>> 16) & 255, (h[i] >>> 8) & 255, h[i] & 255);
+  return out;
+}
+
+function hmac256(keyBytes, msgBytes) {
+  var key = keyBytes.length > 64 ? sha256Bytes(keyBytes) : keyBytes.slice();
+  while (key.length < 64) key.push(0);
+  var i, inner = [], outer = [];
+  for (i = 0; i < 64; i++) { inner.push(key[i] ^ 0x36); outer.push(key[i] ^ 0x5c); }
+  return sha256Bytes(outer.concat(sha256Bytes(inner.concat(msgBytes))));
+}
+
+function hexOf(bytes) {
+  var s = "";
+  for (var i = 0; i < bytes.length; i++) s += (bytes[i] < 16 ? "0" : "") + bytes[i].toString(16);
+  return s;
+}
+function sha256Hex(s) { return hexOf(sha256Bytes(utf8Bytes(s))); }
+
+function amzDate() {
+  var n = new Date();
+  function p(x) { return (x < 10 ? "0" : "") + x; }
+  return "" + n.getUTCFullYear() + p(n.getUTCMonth()+1) + p(n.getUTCDate()) +
+    "T" + p(n.getUTCHours()) + p(n.getUTCMinutes()) + p(n.getUTCSeconds()) + "Z";
+}
+
+// Signs a POST of the CloudWatch query protocol and returns the XML text.
+function awsQuery(cfg, service, bodyParams) {
+  var host = service + "." + cfg.region + ".amazonaws.com";
+  var body = bodyParams.map(function (kv) {
+    return encodeURIComponent(kv[0]) + "=" + encodeURIComponent(kv[1]);
+  }).join("&");
+  var date = amzDate();
+  var day = date.substr(0, 8);
+  var contentType = "application/x-www-form-urlencoded; charset=utf-8";
+  var canonical = "POST\n/\n\n" +
+    "content-type:" + contentType + "\n" +
+    "host:" + host + "\n" +
+    "x-amz-date:" + date + "\n\n" +
+    "content-type;host;x-amz-date\n" +
+    sha256Hex(body);
+  var scope = day + "/" + cfg.region + "/" + service + "/aws4_request";
+  var toSign = "AWS4-HMAC-SHA256\n" + date + "\n" + scope + "\n" + sha256Hex(canonical);
+  var kDate = hmac256(utf8Bytes("AWS4" + cfg.secretAccessKey), utf8Bytes(day));
+  var kRegion = hmac256(kDate, utf8Bytes(cfg.region));
+  var kService = hmac256(kRegion, utf8Bytes(service));
+  var kSigning = hmac256(kService, utf8Bytes("aws4_request"));
+  var signature = hexOf(hmac256(kSigning, utf8Bytes(toSign)));
+  var auth = "AWS4-HMAC-SHA256 Credential=" + cfg.accessKeyId + "/" + scope +
+    ", SignedHeaders=content-type;host;x-amz-date, Signature=" + signature;
+  return xhrRequest("POST", "https://" + host + "/", {
+    "Content-Type": contentType,
+    "X-Amz-Date": date,
+    "Authorization": auth
+  }, body);
+}
+
+function refreshAws() {
+  var cfg = APPCONFIG && APPCONFIG.aws;
+  if (!cfg || !hasValue(cfg.accessKeyId) || !hasValue(cfg.secretAccessKey)) return;
+  var end = new Date();
+  var start = new Date(end.getTime() - 24 * 3600 * 1000);
+  awsQuery(cfg, "monitoring", [
+    ["Action", "GetMetricData"],
+    ["Version", "2010-08-01"],
+    ["StartTime", start.toISOString()],
+    ["EndTime", end.toISOString()],
+    ["ScanBy", "TimestampDescending"],
+    ["MetricDataQueries.member.1.Id", "cost"],
+    ["MetricDataQueries.member.1.MetricStat.Metric.Namespace", "AWS/Billing"],
+    ["MetricDataQueries.member.1.MetricStat.Metric.MetricName", "EstimatedCharges"],
+    ["MetricDataQueries.member.1.MetricStat.Metric.Dimensions.member.1.Name", "Currency"],
+    ["MetricDataQueries.member.1.MetricStat.Metric.Dimensions.member.1.Value", "USD"],
+    ["MetricDataQueries.member.1.MetricStat.Period", "21600"],
+    ["MetricDataQueries.member.1.MetricStat.Stat", "Maximum"]
+  ]).then(function (xml) {
+    var doc = new DOMParser().parseFromString(xml, "text/xml");
+    var vals = doc.getElementsByTagName("Values")[0];
+    var first = vals && vals.getElementsByTagName("member")[0];
+    if (first) {
+      OPS.aws = { costMtd: parseFloat(first.textContent) };
+      saveOpsCache();
+      renderOps();
+    }
+  }).catch(function (e) {
+    if (window.console && console.warn) console.warn("aws:", e);
+  });
+}
+
+// ---------- Render ----------
+function renderOps() {
+  var lines = [];
+  var g = OPS.github, p = OPS.posthog, a = OPS.aws;
+  if (g) {
+    lines.push("<div class='ops-line'><b>" + fmtNum(g.reviews) + "</b> review" + (g.reviews === 1 ? "" : "s") + " waiting" +
+      " · <b>" + fmtNum(g.prsOpen) + "</b> prs open</div>");
+    var l2 = "<b>" + fmtNum(g.commitsToday) + "</b> commits today";
+    if (g.deploys && g.deploys.length) {
+      l2 += " · " + g.deploys.map(function (d) {
+        var glyph = d.state === "success" ? "<span class='ok'>✓</span>"
+          : (d.state === "failure" ? "<span class='bad'>✕</span>" : "<span class='dim'>◦</span>");
+        return d.label + " " + glyph;
+      }).join(" · ");
+    }
+    lines.push("<div class='ops-line'>" + l2 + "</div>");
+  }
+  if (p) {
+    lines.push("<div class='ops-line'><b>" + fmtNum(p.dau) + "</b> actives" +
+      " · <b>" + fmtNum(p.wau) + "</b> weekly" +
+      " · <b>" + fmtNum(p.events) + "</b> events</div>");
+  }
+  if (a) {
+    lines.push("<div class='ops-line'>aws <b>$" + Math.round(a.costMtd).toLocaleString("en-US") + "</b> month to date</div>");
+  }
+  if (!lines.length) return;
+  var brand = (APPCONFIG && APPCONFIG.brand) || "";
+  $("ops").innerHTML = (brand ? "<div class='ops-brand'>" + brand + "</div>" : "") + lines.join("");
+  $("ops").className = "";
+}
+
+function saveOpsCache() {
+  try { localStorage.setItem("skylight_ops", JSON.stringify(OPS)); } catch (e) {}
+}
+function loadOpsCache() {
+  try {
+    var raw = localStorage.getItem("skylight_ops");
+    if (raw) { OPS = JSON.parse(raw); renderOps(); }
+  } catch (e) {}
+}
+
+function startOps() {
+  loadOpsCache();
+  refreshGithub();
+  refreshPosthog();
+  refreshAws();
+  setInterval(refreshGithub, 10 * 60 * 1000);
+  setInterval(refreshPosthog, 15 * 60 * 1000);
+  setInterval(refreshAws, 30 * 60 * 1000);
+}
+
+function loadAppConfig() {
+  if (/[?&]mock=1/.test(location.search)) {
+    APPCONFIG = { brand: "omnova" };
+    OPS.github = {
+      prsOpen: 36, reviews: 1, commitsToday: 26,
+      deploys: [{ label: "teams", state: "success" }, { label: "platform", state: "failure" }]
+    };
+    OPS.posthog = { dau: 87, wau: 412, events: 12401 };
+    OPS.aws = { costMtd: 418 };
+    renderOps();
+    return;
+  }
+  xhrJSON("GET", "config.json", null).then(function (c) {
+    APPCONFIG = c;
+    startOps();
+  }).catch(function () { /* no config baked in — ops stays hidden */ });
+}
+
 // ---------- Boot ----------
 loadCache();
 scheduleClock();
 drawStars();
 renderSky();
 refreshWeather();
+loadAppConfig();
 
 setInterval(refreshWeather, CONFIG.weatherRefreshMinutes * 60 * 1000);
 setInterval(renderSky, 60 * 1000);
