@@ -2,3 +2,4 @@ android/build/
 android/keystore.jks
 android/*.png
 .DS_Store
+android/secrets.json
