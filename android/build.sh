@@ -12,20 +12,21 @@ OUT=build
 rm -rf "$OUT"
 mkdir -p "$OUT/classes"
 
-# 1. Assemble assets: shared web page, with Google Fonts links swapped
+# 1. Assemble assets: shared web pages, with Google Fonts links swapped
 #    for the TTFs bundled in assets/fonts/.
 python3 - <<'PY'
 import re
-src = open("../index.html").read()
 fontface = """<style>
 @font-face { font-family: 'Cormorant Garamond'; src: url('fonts/CormorantGaramond.ttf'); font-weight: 300 700; font-style: normal; }
 @font-face { font-family: 'Cormorant Garamond'; src: url('fonts/CormorantGaramond-Italic.ttf'); font-weight: 300 700; font-style: italic; }
 @font-face { font-family: 'Outfit'; src: url('fonts/Outfit.ttf'); font-weight: 100 900; font-style: normal; }
 </style>"""
-out = re.sub(r"<!-- webfonts:start -->.*?<!-- webfonts:end -->", fontface, src, flags=re.S)
-assert out != src, "webfonts markers not found in ../index.html"
-open("app/src/main/assets/index.html", "w").write(out)
-print("assets/index.html assembled (local fonts)")
+for page in ["index.html", "dashboard.html"]:
+    src = open("../" + page).read()
+    out = re.sub(r"<!-- webfonts:start -->.*?<!-- webfonts:end -->", fontface, src, flags=re.S)
+    assert out != src, "webfonts markers not found in ../" + page
+    open("app/src/main/assets/" + page, "w").write(out)
+    print("assets/" + page + " assembled (local fonts)")
 PY
 
 # 1b. Bake secrets into the APK as config.json (local-only file; gitignored)
@@ -36,12 +37,14 @@ else
   rm -f app/src/main/assets/config.json
 fi
 
-# 2. Link manifest + assets into a resource-only APK
+# 2. Compile res, then link manifest + res + assets into an APK
+"$BT/aapt2" compile --dir app/src/main/res -o "$OUT/res.zip"
 "$BT/aapt2" link -o "$OUT/base.apk" \
   --manifest app/src/main/AndroidManifest.xml \
   -I "$PLATFORM" \
   -A app/src/main/assets \
-  --min-sdk-version 26 --target-sdk-version 34
+  --min-sdk-version 26 --target-sdk-version 34 \
+  "$OUT/res.zip"
 
 # 3. Compile the service and dex it
 "$JAVA_HOME/bin/javac" --release 8 -classpath "$PLATFORM" \

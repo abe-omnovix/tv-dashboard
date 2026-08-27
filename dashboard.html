@@ -1,0 +1,608 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Skylight Ops</title>
+<!-- webfonts:start -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,300;0,400;1,300;1,400&family=Outfit:wght@200;300;400;500&display=swap" rel="stylesheet">
+<!-- webfonts:end -->
+<style>
+  :root {
+    --sky-top: #060811;
+    --sky-mid: #0C1124;
+    --sky-low: #141A33;
+    --ink: #F2EFE7;
+    --ink-dim: rgba(242, 239, 231, 0.66);
+    --ink-faint: rgba(242, 239, 231, 0.40);
+    --line: rgba(242, 239, 231, 0.13);
+    --ok: rgba(168, 212, 176, 0.85);
+    --warn: rgba(226, 192, 134, 0.9);
+    --bad: rgba(226, 156, 143, 0.9);
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  html, body { width: 100%; height: 100%; overflow: hidden; cursor: none; background: #080B16; }
+
+  body { font-family: 'Outfit', 'Helvetica Neue', Arial, sans-serif; color: var(--ink); -webkit-font-smoothing: antialiased; }
+
+  /* sky whisper: live gradient, heavily dimmed for legibility */
+  #sky { position: fixed; top:0; left:0; width:100%; height:100%;
+    background: linear-gradient(to bottom, var(--sky-top) 0%, var(--sky-mid) 55%, var(--sky-low) 100%);
+    transition: background 6s linear; }
+  #dim { position: fixed; top:0; left:0; width:100%; height:100%;
+    background: linear-gradient(180deg, rgba(7,10,20,0.52) 0%, rgba(7,10,20,0.82) 34%, rgba(7,10,20,0.92) 100%); }
+  #grain { position: fixed; top:0; left:0; width:100%; height:100%; opacity:0.05; pointer-events:none;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='160' height='160' filter='url(%23n)' opacity='0.6'/%3E%3C/svg%3E"); }
+
+  #frame { position: fixed; top:0; left:0; width:100%; height:100%;
+    padding: 4.5vh 4vw 4vh; display: flex; flex-direction: column;
+    transition: transform 12s ease-in-out; }
+
+  /* ---- header ---- */
+  #hdr { display: flex; align-items: baseline; gap: 2.5vw; padding-bottom: 2.4vh; border-bottom: 1px solid var(--line); }
+  #clock { font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 300; font-size: 7vh; line-height: 1; letter-spacing: -0.01em; }
+  #clock .mer { font-family: 'Outfit', Arial, sans-serif; font-weight: 300; font-size: 2vh; letter-spacing: 0.3em; text-transform: uppercase; color: var(--ink-dim); margin-left: 1vh; }
+  #date { font-weight: 300; font-size: 1.9vh; letter-spacing: 0.36em; text-transform: uppercase; color: var(--ink-dim); }
+  #wx { font-family: 'Cormorant Garamond', Georgia, serif; font-style: italic; font-weight: 300; font-size: 3vh; color: var(--ink-dim); flex: 1; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  #brand { font-weight: 300; font-size: 1.9vh; letter-spacing: 0.42em; text-transform: uppercase; color: var(--ink-faint); }
+
+  /* ---- columns ---- */
+  #grid { flex: 1; display: flex; gap: 3.2vw; padding-top: 3vh; min-height: 0; }
+  .col { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+  .col h2 { font-weight: 300; font-size: 1.7vh; letter-spacing: 0.42em; text-transform: uppercase; color: var(--ink-faint); padding-bottom: 1.4vh; border-bottom: 1px solid var(--line); margin-bottom: 2vh; }
+
+  .empty { font-weight: 300; font-size: 1.9vh; letter-spacing: 0.2em; text-transform: uppercase; color: var(--ink-faint); margin-top: 2vh; }
+
+  /* github rows */
+  .pr { margin-bottom: 2.1vh; }
+  .pr .t { font-weight: 400; font-size: 2.1vh; line-height: 1.3; color: var(--ink);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .pr .t .star { color: var(--warn); margin-right: 0.8vh; }
+  .pr .m { font-weight: 300; font-size: 1.5vh; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint); margin-top: 0.5vh;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .foot { border-top: 1px solid var(--line); margin-top: auto; padding-top: 1.8vh;
+    font-weight: 300; font-size: 1.6vh; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint); line-height: 1.9; }
+  .foot b { font-weight: 400; color: var(--ink-dim); }
+  .ok { color: var(--ok); } .bad { color: var(--bad); } .dim2 { color: var(--ink-faint); }
+
+  /* posthog */
+  #ph-stats { display: flex; gap: 2vw; margin-bottom: 1vh; }
+  .stat { flex: 1; }
+  .stat .n { font-family: 'Cormorant Garamond', Georgia, serif; font-weight: 300; font-size: 7.5vh; line-height: 1; }
+  .stat .l { font-weight: 300; font-size: 1.4vh; letter-spacing: 0.28em; text-transform: uppercase; color: var(--ink-faint); margin-top: 0.8vh; }
+  #ph-spark { width: 100%; height: 9vh; margin: 2vh 0 1vh; }
+  .sparkcap { font-weight: 300; font-size: 1.4vh; letter-spacing: 0.28em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2.2vh; }
+  .ev { display: flex; align-items: center; gap: 1.2vw; margin-bottom: 1.5vh; }
+  .ev .name { font-weight: 300; font-size: 1.8vh; color: var(--ink-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; width: 46%; }
+  .ev .bar { flex: 1; height: 0.7vh; border-radius: 1vh; background: rgba(242,239,231,0.10); position: relative; overflow: hidden; }
+  .ev .bar i { position: absolute; top:0; left:0; bottom:0; background: rgba(242,239,231,0.34); border-radius: 1vh; }
+  .ev .c { font-weight: 400; font-size: 1.8vh; color: var(--ink-dim); min-width: 3.5vw; text-align: right; }
+
+  /* slack */
+  .sl-mentions { font-weight: 300; font-size: 1.8vh; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint); margin-bottom: 2.2vh; }
+  .sl-mentions b { font-weight: 400; color: var(--ink-dim); }
+  .ch { margin-bottom: 2.4vh; }
+  .ch .h { display: flex; justify-content: space-between; align-items: baseline; }
+  .ch .name { font-weight: 400; font-size: 1.9vh; letter-spacing: 0.18em; text-transform: uppercase; color: var(--ink-dim); }
+  .ch .when { font-weight: 300; font-size: 1.4vh; letter-spacing: 0.22em; text-transform: uppercase; color: var(--ink-faint); }
+  .ch .msg { font-weight: 300; font-size: 2vh; line-height: 1.45; color: var(--ink); opacity: 0.9; margin-top: 0.6vh;
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .ch .msg .who { color: var(--ink-faint); }
+
+  .hidden { visibility: hidden; }
+
+  @media (prefers-reduced-motion: reduce) { #frame { transition: none; } }
+</style>
+</head>
+<body>
+  <div id="sky"></div>
+  <div id="dim"></div>
+  <div id="grain"></div>
+
+  <div id="frame">
+    <div id="hdr">
+      <div><span id="clock">&nbsp;</span></div>
+      <div id="date">&nbsp;</div>
+      <div id="wx">&nbsp;</div>
+      <div id="brand">skylight ops</div>
+    </div>
+    <div id="grid">
+      <section class="col">
+        <h2>shipping</h2>
+        <div id="gh-prs"><div class="empty">waiting for github&hellip;</div></div>
+        <div class="foot" id="gh-foot"></div>
+      </section>
+      <section class="col">
+        <h2>product</h2>
+        <div id="ph-stats"></div>
+        <svg id="ph-spark" preserveAspectRatio="none"></svg>
+        <div class="sparkcap" id="ph-sparkcap"></div>
+        <div id="ph-events"><div class="empty">waiting for posthog&hellip;</div></div>
+      </section>
+      <section class="col">
+        <h2>comms</h2>
+        <div id="sl-body"><div class="empty">slack not connected</div></div>
+      </section>
+    </div>
+  </div>
+
+<script>
+// ================= CONFIG =================
+var CONFIG = {
+  latitude: null, longitude: null, locationName: null,
+  units: "fahrenheit", hour12: true
+};
+// ==========================================
+
+var APPCONFIG = null;
+var DASH = { gh: null, ph: null, sl: null, wx: null };
+
+function $(id) { return document.getElementById(id); }
+function soft(p) { return p.catch(function () { return null; }); }
+function hasValue(v) { return typeof v === "string" && v.length > 0 && v.indexOf("PASTE") !== 0; }
+
+function xhrRequest(method, url, headers, body) {
+  return new Promise(function (resolve, reject) {
+    var x = new XMLHttpRequest();
+    x.open(method, url, true);
+    if (headers) { for (var k in headers) x.setRequestHeader(k, headers[k]); }
+    x.onreadystatechange = function () {
+      if (x.readyState === 4) {
+        if (x.status >= 200 && x.status < 300) resolve(x.responseText);
+        else reject(new Error(method + " " + url + " -> HTTP " + x.status));
+      }
+    };
+    x.onerror = function () { reject(new Error("network error: " + url)); };
+    x.send(body || null);
+  });
+}
+function xhrJSON(method, url, headers, body) {
+  return xhrRequest(method, url, headers, body).then(function (t) { return JSON.parse(t); });
+}
+
+function fmtNum(n) {
+  if (n >= 10000) return Math.round(n / 1000) + "k";
+  return Number(n).toLocaleString("en-US");
+}
+function esc(s) {
+  return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function localDateStr() {
+  var n = new Date(), m = n.getMonth() + 1, d = n.getDate();
+  return n.getFullYear() + "-" + (m < 10 ? "0" : "") + m + "-" + (d < 10 ? "0" : "") + d;
+}
+function ageOf(iso) {
+  var ms = Date.now() - new Date(iso).getTime();
+  var h = Math.floor(ms / 3600000);
+  if (h < 1) return "now";
+  if (h < 24) return h + "h";
+  return Math.floor(h / 24) + "d";
+}
+
+// ---------- clock ----------
+var DAYS = ["sun","mon","tue","wed","thu","fri","sat"];
+var MONTHS = ["january","february","march","april","may","june","july","august","september","october","november","december"];
+function renderClock() {
+  var now = new Date();
+  var h = now.getHours(), m = now.getMinutes(), mer = "";
+  if (CONFIG.hour12) { mer = h >= 12 ? "pm" : "am"; h = h % 12; if (h === 0) h = 12; }
+  $("clock").innerHTML = h + ":" + (m < 10 ? "0" : "") + m + (CONFIG.hour12 ? "<span class='mer'>" + mer + "</span>" : "");
+  $("date").textContent = DAYS[now.getDay()] + " — " + MONTHS[now.getMonth()] + " " + now.getDate();
+}
+function scheduleClock() {
+  renderClock();
+  setTimeout(scheduleClock, 60000 - (Date.now() % 60000) + 50);
+}
+
+// ---------- weather (compact) ----------
+var WMO = {0:"clear",1:"mostly clear",2:"partly cloudy",3:"overcast",45:"fog",48:"freezing fog",
+  51:"light drizzle",53:"drizzle",55:"heavy drizzle",56:"freezing drizzle",57:"freezing drizzle",
+  61:"light rain",63:"rain",65:"heavy rain",66:"freezing rain",67:"freezing rain",
+  71:"light snow",73:"snow",75:"heavy snow",77:"snow grains",80:"showers",81:"showers",82:"violent showers",
+  85:"snow showers",86:"snow showers",95:"thunderstorms",96:"thunderstorms",99:"thunderstorms"};
+
+function refreshWeather() {
+  var locP;
+  if (CONFIG.latitude !== null) {
+    locP = Promise.resolve({ lat: CONFIG.latitude, lon: CONFIG.longitude, place: CONFIG.locationName });
+  } else {
+    locP = xhrJSON("GET", "https://ipapi.co/json/").then(function (d) {
+      return { lat: d.latitude, lon: d.longitude, place: d.city };
+    }).catch(function () {
+      return xhrJSON("GET", "https://get.geojs.io/v1/ip/geo.json").then(function (d) {
+        return { lat: parseFloat(d.latitude), lon: parseFloat(d.longitude), place: d.city };
+      });
+    });
+  }
+  locP.then(function (loc) {
+    var tu = CONFIG.units === "celsius" ? "celsius" : "fahrenheit";
+    return xhrJSON("GET", "https://api.open-meteo.com/v1/forecast?latitude=" + loc.lat + "&longitude=" + loc.lon +
+      "&current=temperature_2m,weather_code&daily=temperature_2m_max,temperature_2m_min,sunrise,sunset" +
+      "&temperature_unit=" + tu + "&timezone=auto&forecast_days=1").then(function (w) {
+        DASH.wx = {
+          desc: WMO[w.current.weather_code] || "",
+          t: Math.round(w.current.temperature_2m),
+          hi: Math.round(w.daily.temperature_2m_max[0]),
+          lo: Math.round(w.daily.temperature_2m_min[0]),
+          place: loc.place || "",
+          sunrise: w.daily.sunrise[0], sunset: w.daily.sunset[0]
+        };
+        saveDash();
+        renderWx();
+        renderSky();
+      });
+  }).catch(function () {});
+}
+function renderWx() {
+  var w = DASH.wx;
+  if (!w) return;
+  $("wx").textContent = w.desc + ", " + w.t + "° · high " + w.hi + "° low " + w.lo + "°" + (w.place ? " · " + w.place : "");
+}
+
+// ---------- sky whisper ----------
+function hexToRgb(hex) { return [parseInt(hex.substr(1,2),16), parseInt(hex.substr(3,2),16), parseInt(hex.substr(5,2),16)]; }
+function mix(a,b,t) { return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t]; }
+function rgbCss(c) { return "rgb(" + Math.round(c[0]) + "," + Math.round(c[1]) + "," + Math.round(c[2]) + ")"; }
+var PALETTES = {
+  night:   ["#060811", "#0C1124", "#141A33"],
+  dawn:    ["#161A38", "#3A3560", "#95566A"],
+  sunrise: ["#2A3A66", "#6E6C95", "#D89A6E"],
+  day:     ["#31517C", "#5D7FA6", "#93AFC6"],
+  golden:  ["#2C3B68", "#6B5E88", "#D08A5F"],
+  dusk:    ["#10142E", "#2E2A52", "#7C4B66"]
+};
+function minutesOfDay(iso) { return parseInt(iso.substr(11,2),10) * 60 + parseInt(iso.substr(14,2),10); }
+function renderSky() {
+  var rise = DASH.wx && DASH.wx.sunrise ? minutesOfDay(DASH.wx.sunrise) : 390;
+  var set = DASH.wx && DASH.wx.sunset ? minutesOfDay(DASH.wx.sunset) : 1170;
+  var frames = [[rise-80,"night"],[rise-25,"dawn"],[rise+25,"sunrise"],[rise+110,"day"],
+    [set-100,"day"],[set-25,"golden"],[set+20,"dusk"],[set+75,"night"]];
+  var now = new Date();
+  var nowMin = now.getHours() * 60 + now.getMinutes();
+  var colors;
+  if (nowMin <= frames[0][0] || nowMin >= frames[frames.length-1][0]) {
+    colors = PALETTES.night.map(hexToRgb);
+  } else {
+    var i;
+    for (i = 0; i < frames.length - 1; i++) { if (nowMin >= frames[i][0] && nowMin < frames[i+1][0]) break; }
+    var t = (nowMin - frames[i][0]) / (frames[i+1][0] - frames[i][0]);
+    colors = [0,1,2].map(function (k) {
+      return mix(hexToRgb(PALETTES[frames[i][1]][k]), hexToRgb(PALETTES[frames[i+1][1]][k]), t);
+    });
+  }
+  var root = document.documentElement;
+  root.style.setProperty("--sky-top", rgbCss(colors[0]));
+  root.style.setProperty("--sky-mid", rgbCss(colors[1]));
+  root.style.setProperty("--sky-low", rgbCss(colors[2]));
+}
+
+// ---------- github ----------
+function ghGet(cfg, path) {
+  return xhrJSON("GET", "https://api.github.com" + path,
+    { "Authorization": "Bearer " + cfg.token, "Accept": "application/vnd.github+json" });
+}
+function refreshGithub() {
+  var cfg = APPCONFIG && APPCONFIG.github;
+  if (!cfg || !hasValue(cfg.token)) return;
+  var org = cfg.org;
+  ghGet(cfg, "/user").then(function (u) {
+    var deploys = Promise.all((cfg.repos || []).map(function (r) {
+      return ghGet(cfg, "/repos/" + r.repo + "/actions/runs?branch=main&per_page=1").then(function (d) {
+        var run = d.workflow_runs && d.workflow_runs[0];
+        return { label: r.label, state: run ? (run.conclusion || "running") : "none" };
+      }).catch(function () { return { label: r.label, state: "unknown" }; });
+    }));
+    var enc = encodeURIComponent;
+    return Promise.all([
+      soft(ghGet(cfg, "/search/issues?q=" + enc("org:" + org + " is:pr is:open draft:false") + "&sort=updated&order=desc&per_page=9")),
+      soft(ghGet(cfg, "/search/issues?q=" + enc("org:" + org + " is:pr is:open review-requested:" + u.login) + "&per_page=30")),
+      soft(ghGet(cfg, "/search/commits?q=" + enc("org:" + org + " author-date:>=" + localDateStr()) + "&per_page=1")),
+      deploys
+    ]);
+  }).then(function (r) {
+    var wantsMe = {};
+    if (r[1] && r[1].items) {
+      r[1].items.forEach(function (it) { wantsMe[it.url] = true; });
+    }
+    var prs = [];
+    if (r[0] && r[0].items) {
+      prs = r[0].items.map(function (it) {
+        return {
+          title: it.title,
+          repo: it.repository_url.split("/").pop(),
+          author: it.user ? it.user.login : "",
+          age: ageOf(it.created_at),
+          mine: !!wantsMe[it.url]
+        };
+      });
+    }
+    DASH.gh = {
+      prs: prs,
+      prsOpen: r[0] ? r[0].total_count : null,
+      reviews: r[1] ? r[1].total_count : null,
+      commitsToday: r[2] ? r[2].total_count : null,
+      deploys: r[3]
+    };
+    saveDash();
+    renderGithub();
+  }).catch(function (e) { if (window.console) console.warn("github:", e); });
+}
+function renderGithub() {
+  var g = DASH.gh;
+  if (!g) return;
+  var html = "";
+  (g.prs || []).slice(0, 8).forEach(function (p) {
+    html += "<div class='pr'><div class='t'>" + (p.mine ? "<span class='star'>★</span>" : "") + esc(p.title) + "</div>" +
+      "<div class='m'>" + esc(p.repo) + " · " + esc(p.author) + " · " + p.age + "</div></div>";
+  });
+  $("gh-prs").innerHTML = html || "<div class='empty'>no open prs</div>";
+  var foot = [];
+  var bits = [];
+  if (g.reviews != null) bits.push("<b>" + fmtNum(g.reviews) + "</b> for review");
+  if (g.prsOpen != null) bits.push("<b>" + fmtNum(g.prsOpen) + "</b> open");
+  if (g.commitsToday != null) bits.push("<b>" + fmtNum(g.commitsToday) + "</b> commits today");
+  if (bits.length) foot.push(bits.join(" · "));
+  if (g.deploys && g.deploys.length) {
+    foot.push("deploys · " + g.deploys.map(function (d) {
+      var glyph = d.state === "success" ? "<span class='ok'>✓</span>"
+        : (d.state === "failure" ? "<span class='bad'>✕</span>" : "<span class='dim2'>◦</span>");
+      return esc(d.label) + " " + glyph;
+    }).join(" · "));
+  }
+  $("gh-foot").innerHTML = foot.join("<br>");
+}
+
+// ---------- posthog ----------
+function phQuery(cfg, hogql) {
+  return xhrJSON("POST", cfg.host + "/api/projects/" + cfg.projectId + "/query/",
+    { "Authorization": "Bearer " + cfg.personalApiKey, "Content-Type": "application/json" },
+    JSON.stringify({ query: { kind: "HogQLQuery", query: hogql } }));
+}
+function phCell(r) { return (r && r.results && r.results[0] && r.results[0][0]) || 0; }
+
+function refreshPosthog() {
+  var cfg = APPCONFIG && APPCONFIG.posthog;
+  if (!cfg || !hasValue(cfg.personalApiKey)) return;
+  var ready = cfg.projectId ? Promise.resolve()
+    : xhrJSON("GET", cfg.host + "/api/projects/", { "Authorization": "Bearer " + cfg.personalApiKey })
+        .then(function (d) { cfg.projectId = d.results[0].id; });
+  ready.then(function () {
+    return Promise.all([
+      soft(phQuery(cfg, "select count(distinct person_id) from events where timestamp >= today()")),
+      soft(phQuery(cfg, "select count(distinct person_id) from events where timestamp >= now() - interval 7 day")),
+      soft(phQuery(cfg, "select count() from events where timestamp >= today() and event in ('project_chat.message_sent','goal.compose_message_sent','canvas.compose_message_sent')")),
+      soft(phQuery(cfg, "select toDate(timestamp) as d, count(distinct person_id) from events where timestamp > now() - interval 14 day group by d order by d")),
+      soft(phQuery(cfg, "select event, count() from events where timestamp >= today() and event not like '$%' group by event order by count() desc limit 6"))
+    ]);
+  }).then(function (r) {
+    if (!r[0] && !r[1] && !r[2] && !r[3] && !r[4]) return;
+    DASH.ph = {
+      dau: r[0] ? phCell(r[0]) : null,
+      wau: r[1] ? phCell(r[1]) : null,
+      messages: r[2] ? phCell(r[2]) : null,
+      series: r[3] && r[3].results ? r[3].results.map(function (row) { return row[1]; }) : null,
+      top: r[4] && r[4].results ? r[4].results : null
+    };
+    saveDash();
+    renderPosthog();
+  }).catch(function (e) { if (window.console) console.warn("posthog:", e); });
+}
+function renderPosthog() {
+  var p = DASH.ph;
+  if (!p) return;
+  var stats = "";
+  if (p.dau != null) stats += "<div class='stat'><div class='n'>" + fmtNum(p.dau) + "</div><div class='l'>actives today</div></div>";
+  if (p.wau != null) stats += "<div class='stat'><div class='n'>" + fmtNum(p.wau) + "</div><div class='l'>weekly</div></div>";
+  if (p.messages != null) stats += "<div class='stat'><div class='n'>" + fmtNum(p.messages) + "</div><div class='l'>messages today</div></div>";
+  $("ph-stats").innerHTML = stats;
+
+  if (p.series && p.series.length > 1) {
+    var svg = $("ph-spark");
+    var W = 100, H = 100;
+    svg.setAttribute("viewBox", "0 0 " + W + " " + H);
+    var max = Math.max.apply(null, p.series) || 1;
+    var pts = p.series.map(function (v, i) {
+      var x = (i / (p.series.length - 1)) * W;
+      var y = H - 8 - (v / max) * (H - 20);
+      return x.toFixed(1) + "," + y.toFixed(1);
+    });
+    svg.innerHTML =
+      "<polyline points='" + pts.join(" ") + "' fill='none' stroke='rgba(242,239,231,0.55)' stroke-width='2' vector-effect='non-scaling-stroke'/>" +
+      "<polygon points='0," + H + " " + pts.join(" ") + " " + W + "," + H + "' fill='rgba(242,239,231,0.07)'/>";
+    $("ph-sparkcap").textContent = "daily actives · last 14 days";
+  }
+
+  if (p.top && p.top.length) {
+    var max2 = p.top[0][1] || 1;
+    $("ph-events").innerHTML = p.top.map(function (row) {
+      var pct = Math.max(4, Math.round((row[1] / max2) * 100));
+      return "<div class='ev'><div class='name'>" + esc(row[0]) + "</div>" +
+        "<div class='bar'><i style='width:" + pct + "%'></i></div>" +
+        "<div class='c'>" + fmtNum(row[1]) + "</div></div>";
+    }).join("");
+  }
+}
+
+// ---------- slack ----------
+var SL_USERS = {};
+function slackGet(cfg, method, params) {
+  var qs = [];
+  for (var k in params) qs.push(encodeURIComponent(k) + "=" + encodeURIComponent(params[k]));
+  return xhrJSON("GET", "https://slack.com/api/" + method + (qs.length ? "?" + qs.join("&") : ""),
+    { "Authorization": "Bearer " + cfg.token }).then(function (d) {
+      if (!d.ok) throw new Error("slack " + method + ": " + d.error);
+      return d;
+    });
+}
+function slackUserName(cfg, uid) {
+  if (SL_USERS[uid]) return Promise.resolve(SL_USERS[uid]);
+  return slackGet(cfg, "users.info", { user: uid }).then(function (d) {
+    var n = (d.user.profile && (d.user.profile.display_name || d.user.profile.real_name)) || d.user.name;
+    SL_USERS[uid] = n;
+    return n;
+  }).catch(function () { return "someone"; });
+}
+function cleanSlackText(t) {
+  return String(t || "")
+    .replace(/<@([A-Z0-9]+)>/g, "@…")
+    .replace(/<#[A-Z0-9]+\|([^>]*)>/g, "#$1")
+    .replace(/<https?:[^|>]*\|([^>]*)>/g, "$1")
+    .replace(/<https?:[^>]*>/g, "link")
+    .replace(/&gt;/g, ">").replace(/&lt;/g, "<").replace(/&amp;/g, "&")
+    .replace(/\n+/g, " ");
+}
+function slackWhen(ts) {
+  var d = new Date(parseFloat(ts) * 1000);
+  var now = new Date();
+  var h = d.getHours(), m = d.getMinutes();
+  var mer = h >= 12 ? "p" : "a"; h = h % 12; if (h === 0) h = 12;
+  var hm = h + ":" + (m < 10 ? "0" : "") + m + mer;
+  if (d.toDateString() === now.toDateString()) return hm;
+  return DAYS[d.getDay()] + " " + hm;
+}
+
+function refreshSlack() {
+  var cfg = APPCONFIG && APPCONFIG.slack;
+  if (!cfg || !hasValue(cfg.token)) return;
+  var midnight = new Date();
+  midnight.setHours(0, 0, 0, 0);
+  var oldest = (midnight.getTime() / 1000).toFixed(0);
+
+  slackGet(cfg, "auth.test", {}).then(function (me) {
+    var chanP = slackGet(cfg, "conversations.list",
+      { types: "public_channel,private_channel", exclude_archived: "true", limit: "999" })
+      .then(function (d) {
+        var byName = {};
+        d.channels.forEach(function (c) { byName[c.name] = c.id; });
+        return (cfg.channels || []).map(function (n) { return { name: n, id: byName[n] || null }; });
+      });
+    var mentionsP = soft(slackGet(cfg, "search.messages",
+      { query: "<@" + me.user_id + "> after:" + localDateStr(), count: "1" }));
+    return Promise.all([chanP, mentionsP]);
+  }).then(function (r) {
+    var chans = r[0].filter(function (c) { return c.id; });
+    var mentions = r[1] && r[1].messages ? r[1].messages.total : null;
+    return Promise.all(chans.map(function (c) {
+      return Promise.all([
+        soft(slackGet(cfg, "conversations.history", { channel: c.id, limit: "1" })),
+        soft(slackGet(cfg, "conversations.history", { channel: c.id, oldest: oldest, limit: "100" }))
+      ]).then(function (h) {
+        var last = h[0] && h[0].messages && h[0].messages[0];
+        var todayCount = h[1] && h[1].messages ? h[1].messages.length : 0;
+        if (h[1] && h[1].has_more) todayCount = 100;
+        var whoP = last && last.user ? slackUserName(cfg, last.user)
+          : Promise.resolve(last && last.username ? last.username : "");
+        return whoP.then(function (who) {
+          return { name: c.name, who: who, text: last ? cleanSlackText(last.text) : "",
+            ts: last ? last.ts : null, today: todayCount };
+        });
+      });
+    })).then(function (rows) {
+      DASH.sl = { mentions: mentions, channels: rows };
+      saveDash();
+      renderSlack();
+    });
+  }).catch(function (e) { if (window.console) console.warn("slack:", e); });
+}
+function renderSlack() {
+  var s = DASH.sl;
+  if (!s) return;
+  var html = "";
+  if (s.mentions != null) {
+    html += "<div class='sl-mentions'><b>" + fmtNum(s.mentions) + "</b> mention" + (s.mentions === 1 ? "" : "s") + " today</div>";
+  }
+  (s.channels || []).forEach(function (c) {
+    html += "<div class='ch'><div class='h'><span class='name'># " + esc(c.name) +
+      (c.today ? " · " + (c.today >= 100 ? "99+" : c.today) : "") + "</span>" +
+      (c.ts ? "<span class='when'>" + slackWhen(c.ts) + "</span>" : "") + "</div>" +
+      (c.text ? "<div class='msg'><span class='who'>" + esc(c.who) + " — </span>" + esc(c.text) + "</div>" : "") +
+      "</div>";
+  });
+  $("sl-body").innerHTML = html || "<div class='empty'>slack not connected</div>";
+}
+
+// ---------- cache / drift / boot ----------
+function saveDash() {
+  try { localStorage.setItem("skylight_dash", JSON.stringify(DASH)); } catch (e) {}
+}
+function loadDash() {
+  try {
+    var raw = localStorage.getItem("skylight_dash");
+    if (raw) {
+      DASH = JSON.parse(raw);
+      renderWx(); renderGithub(); renderPosthog(); renderSlack();
+    }
+  } catch (e) {}
+}
+function drift() {
+  var x = Math.round((Math.random() - 0.5) * 30);
+  var y = Math.round((Math.random() - 0.5) * 24);
+  $("frame").style.transform = "translate(" + x + "px," + y + "px)";
+}
+
+function startAll() {
+  refreshWeather();
+  refreshGithub();
+  refreshPosthog();
+  refreshSlack();
+  setInterval(refreshWeather, 30 * 60 * 1000);
+  setInterval(refreshGithub, 10 * 60 * 1000);
+  setInterval(refreshPosthog, 15 * 60 * 1000);
+  setInterval(refreshSlack, 5 * 60 * 1000);
+}
+
+function loadAppConfig() {
+  if (/[?&]mock=1/.test(location.search)) {
+    APPCONFIG = {};
+    DASH.gh = {
+      prs: [
+        { title: "OMN-753 User connectors: OAuth prep + provider cards", repo: "dynamis-platform", author: "abe-omnovix", age: "2d", mine: true },
+        { title: "Fix forecast baseline drift in scenario harness", repo: "dynamis-teams", author: "mchen", age: "5h", mine: false },
+        { title: "Inbox: Linear binding snapshot renderer", repo: "dynamis-platform", author: "jrivera", age: "1d", mine: true },
+        { title: "Preview environments phase 0: NAT gateway", repo: "omnova-infra", author: "abe-omnovix", age: "3d", mine: false },
+        { title: "Watchtower: dedupe streaming alerts", repo: "dynamis-teams", author: "mchen", age: "6d", mine: false },
+        { title: "Canvas compose: retry on tool timeout", repo: "dynamis-platform", author: "jrivera", age: "8d", mine: false }
+      ],
+      prsOpen: 38, reviews: 3, commitsToday: 12,
+      deploys: [{ label: "teams", state: "success" }, { label: "platform", state: "success" }]
+    };
+    DASH.ph = {
+      dau: 6, wau: 24, messages: 3,
+      series: [3, 5, 4, 7, 6, 9, 5, 8, 11, 7, 9, 12, 8, 6],
+      top: [["team.used", 31], ["canvas.edit_tool_used", 24], ["workspace.switched", 18],
+            ["project_chat.message_sent", 12], ["watchtower.viewed", 9], ["goal.viewed", 6]]
+    };
+    DASH.sl = {
+      mentions: 4,
+      channels: [
+        { name: "engineering", who: "Maya", text: "deploy is green, merging the connector PR after standup", ts: (Date.now()/1000 - 1200).toFixed(0), today: 47 },
+        { name: "product", who: "Jordan", text: "watchtower demo moved to 2pm — invite updated", ts: (Date.now()/1000 - 5400).toFixed(0), today: 12 },
+        { name: "general", who: "Sam", text: "lunch order goes in at 11:30, thread your picks", ts: (Date.now()/1000 - 9000).toFixed(0), today: 8 }
+      ]
+    };
+    DASH.wx = { desc: "clear", t: 79, hi: 97, lo: 70, place: "Provo", sunrise: "2026-08-27T06:52", sunset: "2026-08-27T20:03" };
+    renderWx(); renderGithub(); renderPosthog(); renderSlack(); renderSky();
+    return;
+  }
+  xhrJSON("GET", "config.json", null).then(function (c) {
+    APPCONFIG = c;
+    startAll();
+  }).catch(function () {
+    refreshWeather();
+    setInterval(refreshWeather, 30 * 60 * 1000);
+  });
+}
+
+loadDash();
+scheduleClock();
+renderSky();
+loadAppConfig();
+setInterval(renderSky, 60 * 1000);
+setInterval(drift, 90 * 1000);
+</script>
+</body>
+</html>
