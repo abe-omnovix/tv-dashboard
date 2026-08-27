@@ -624,6 +624,9 @@ function hasValue(v) {
   return typeof v === "string" && v.length > 0 && v.indexOf("PASTE") !== 0;
 }
 
+// one failed query must not blank a whole section
+function soft(p) { return p.catch(function () { return null; }); }
+
 function localDateStr() {
   var n = new Date();
   var m = n.getMonth() + 1, d = n.getDate();
@@ -658,16 +661,16 @@ function refreshGithub() {
         .catch(function () { return { label: r.label, state: "unknown" }; });
     }));
     return Promise.all([
-      ghGet(cfg, "/search/issues?q=" + q("org:" + org + " is:pr is:open draft:false")),
-      ghGet(cfg, "/search/issues?q=" + q("org:" + org + " is:pr is:open review-requested:" + u.login)),
-      ghGet(cfg, "/search/commits?q=" + q("org:" + org + " author-date:>=" + localDateStr())),
+      soft(ghGet(cfg, "/search/issues?q=" + q("org:" + org + " is:pr is:open draft:false"))),
+      soft(ghGet(cfg, "/search/issues?q=" + q("org:" + org + " is:pr is:open review-requested:" + u.login))),
+      soft(ghGet(cfg, "/search/commits?q=" + q("org:" + org + " author-date:>=" + localDateStr()))),
       deploys
     ]);
   }).then(function (r) {
     OPS.github = {
-      prsOpen: r[0].total_count,
-      reviews: r[1].total_count,
-      commitsToday: r[2].total_count,
+      prsOpen: r[0] ? r[0].total_count : null,
+      reviews: r[1] ? r[1].total_count : null,
+      commitsToday: r[2] ? r[2].total_count : null,
       deploys: r[3]
     };
     saveOpsCache();
@@ -697,12 +700,17 @@ function refreshPosthog() {
         .then(function (d) { cfg.projectId = d.results[0].id; });
   ready.then(function () {
     return Promise.all([
-      phQuery(cfg, "select count(distinct person_id) from events where timestamp >= today()"),
-      phQuery(cfg, "select count(distinct person_id) from events where timestamp >= now() - interval 7 day"),
-      phQuery(cfg, "select count() from events where timestamp >= today()")
+      soft(phQuery(cfg, "select count(distinct person_id) from events where timestamp >= today()")),
+      soft(phQuery(cfg, "select count(distinct person_id) from events where timestamp >= now() - interval 7 day")),
+      soft(phQuery(cfg, "select count() from events where timestamp >= today() and event in ('project_chat.message_sent','goal.compose_message_sent','canvas.compose_message_sent')"))
     ]);
   }).then(function (r) {
-    OPS.posthog = { dau: phCell(r[0]), wau: phCell(r[1]), events: phCell(r[2]) };
+    if (!r[0] && !r[1] && !r[2]) return;
+    OPS.posthog = {
+      dau: r[0] ? phCell(r[0]) : null,
+      wau: r[1] ? phCell(r[1]) : null,
+      messages: r[2] ? phCell(r[2]) : null
+    };
     saveOpsCache();
     renderOps();
   }).catch(function (e) {
@@ -860,22 +868,27 @@ function renderOps() {
   var lines = [];
   var g = OPS.github, p = OPS.posthog, a = OPS.aws;
   if (g) {
-    lines.push("<div class='ops-line'><b>" + fmtNum(g.reviews) + "</b> review" + (g.reviews === 1 ? "" : "s") + " waiting" +
-      " · <b>" + fmtNum(g.prsOpen) + "</b> prs open</div>");
-    var l2 = "<b>" + fmtNum(g.commitsToday) + "</b> commits today";
+    var parts1 = [];
+    if (g.reviews != null) parts1.push("<b>" + fmtNum(g.reviews) + "</b> review" + (g.reviews === 1 ? "" : "s") + " waiting");
+    if (g.prsOpen != null) parts1.push("<b>" + fmtNum(g.prsOpen) + "</b> prs open");
+    if (parts1.length) lines.push("<div class='ops-line'>" + parts1.join(" · ") + "</div>");
+    var parts2 = [];
+    if (g.commitsToday != null) parts2.push("<b>" + fmtNum(g.commitsToday) + "</b> commits today");
     if (g.deploys && g.deploys.length) {
-      l2 += " · " + g.deploys.map(function (d) {
+      parts2.push(g.deploys.map(function (d) {
         var glyph = d.state === "success" ? "<span class='ok'>✓</span>"
           : (d.state === "failure" ? "<span class='bad'>✕</span>" : "<span class='dim'>◦</span>");
         return d.label + " " + glyph;
-      }).join(" · ");
+      }).join(" · "));
     }
-    lines.push("<div class='ops-line'>" + l2 + "</div>");
+    if (parts2.length) lines.push("<div class='ops-line'>" + parts2.join(" · ") + "</div>");
   }
   if (p) {
-    lines.push("<div class='ops-line'><b>" + fmtNum(p.dau) + "</b> actives" +
-      " · <b>" + fmtNum(p.wau) + "</b> weekly" +
-      " · <b>" + fmtNum(p.events) + "</b> events</div>");
+    var pp = [];
+    if (p.dau != null) pp.push("<b>" + fmtNum(p.dau) + "</b> actives");
+    if (p.wau != null) pp.push("<b>" + fmtNum(p.wau) + "</b> weekly");
+    if (p.messages != null) pp.push("<b>" + fmtNum(p.messages) + "</b> messages today");
+    if (pp.length) lines.push("<div class='ops-line'>" + pp.join(" · ") + "</div>");
   }
   if (a) {
     lines.push("<div class='ops-line'>aws <b>$" + Math.round(a.costMtd).toLocaleString("en-US") + "</b> month to date</div>");
@@ -913,7 +926,7 @@ function loadAppConfig() {
       prsOpen: 36, reviews: 1, commitsToday: 26,
       deploys: [{ label: "teams", state: "success" }, { label: "platform", state: "failure" }]
     };
-    OPS.posthog = { dau: 87, wau: 412, events: 12401 };
+    OPS.posthog = { dau: 87, wau: 412, messages: 141 };
     OPS.aws = { costMtd: 418 };
     renderOps();
     return;

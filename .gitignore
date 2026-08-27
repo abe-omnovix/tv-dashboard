@@ -5,3 +5,4 @@ android/*.png
 android/secrets.json
 android/app/src/main/assets/index.html
 android/app/src/main/assets/config.json
+/config.json
